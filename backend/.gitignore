@@ -1,0 +1,20 @@
+# Agent / AI IDE files
+.agents/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.pytest_cache/
+
+# React / Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.vscode/
+.idea/
+

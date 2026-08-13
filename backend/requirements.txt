@@ -3,3 +3,4 @@ uvicorn[standard]
 pydantic
 pymysql
 python-dotenv
+pymongo>=4.10

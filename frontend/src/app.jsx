@@ -16,6 +16,7 @@ function App() {
   // =========================================================
 
   const [form, setForm] = useState({
+    database_family: "sql",
     db_type: "mysql",
     host: "127.0.0.1",
     port: 3306,
@@ -23,6 +24,8 @@ function App() {
     username: "root",
     password: "",
   });
+
+  const isMongoDB = form.db_type === "mongodb";
 
   // =========================================================
   // CONNECTION / APPLICATION STATE
@@ -84,31 +87,6 @@ function App() {
 
   // =========================================================
   // NORMALIZE SCHEMA RESPONSE
-  // =========================================================
-  //
-  // Your backend currently returns:
-  //
-  // {
-  //   success: true,
-  //   metadata: {
-  //     database: "metadata_test",
-  //     tables: [
-  //       {
-  //         name: "customers",
-  //         columns: [...]
-  //       }
-  //     ]
-  //   }
-  // }
-  //
-  // Frontend internally uses:
-  //
-  // schema.database_name
-  // table.table_name
-  // schema.relationships
-  //
-  // This function converts backend format into
-  // one consistent frontend format.
   // =========================================================
 
   function normalizeSchemaResponse(result) {
@@ -210,6 +188,11 @@ function App() {
             tableName,
 
           columns,
+
+          indexes:
+            Array.isArray(table?.indexes)
+              ? table.indexes
+              : [],
         };
       }
     );
@@ -261,11 +244,6 @@ function App() {
 
     // =======================================================
     // FALLBACK RELATIONSHIP GENERATION
-    // =======================================================
-    //
-    // If backend doesn't send relationships but sends
-    // referenced_table / referenced_column on FK columns,
-    // generate relationships here.
     // =======================================================
 
     if (relationships.length === 0) {
@@ -342,6 +320,20 @@ function App() {
   const relationshipCount =
     schema?.relationships?.length ?? 0;
 
+  const indexCount =
+    useMemo(() => {
+      if (!schema?.tables) {
+        return 0;
+      }
+
+      return schema.tables.reduce(
+        (total, table) =>
+          total +
+          (table?.indexes?.length || 0),
+        0
+      );
+    }, [schema]);
+
   // =========================================================
   // SELECTED TABLE RELATIONSHIPS
   // =========================================================
@@ -368,39 +360,38 @@ function App() {
   // =========================================================
 
   function handleChange(event) {
-    const { name, value } =
-      event.target;
+    const { name, value } = event.target;
 
-    setForm((current) => ({
-      ...current,
+    setForm((current) => {
+      const updatedForm = {
+        ...current,
+        [name]:
+          name === "port"
+            ? Number(value)
+            : value,
+      };
 
-      [name]:
-        name === "port"
-          ? Number(value)
-          : value,
-    }));
+      if (name === "db_type") {
+        if (value === "mysql") {
+          updatedForm.port = 3306;
+        } else if (value === "postgresql") {
+          updatedForm.port = 5432;
+        } else if (value === "mongodb") {
+          updatedForm.port = 27017;
+        }
+      }
 
-    // Connection information changed.
-    // Reset all previously verified state.
+      return updatedForm;
+    });
 
     setConnectionSuccessful(false);
-
     setConsentGranted(false);
-
     setShowConsent(false);
-
     setSchema(null);
-
     setSelectedTable(null);
-
     setColumnMappings([]);
-
-    setMapping(
-      getEmptyMapping()
-    );
-
+    setMapping(getEmptyMapping());
     setStatus("idle");
-
     setMessage("");
   }
 
@@ -600,7 +591,9 @@ function App() {
     setStatus("loading");
 
     setMessage(
-      "Fetching database schema..."
+      isMongoDB
+        ? "Fetching MongoDB metadata..."
+        : "Fetching database schema..."
     );
 
     try {
@@ -609,20 +602,10 @@ function App() {
           form
         );
 
-      console.log(
-        "Raw schema response:",
-        result
-      );
-
       const normalizedSchema =
         normalizeSchemaResponse(
           result
         );
-
-      console.log(
-        "Normalized schema:",
-        normalizedSchema
-      );
 
       if (
         !Array.isArray(
@@ -649,7 +632,9 @@ function App() {
       setStatus("success");
 
       setMessage(
-        `Schema loaded successfully: ${normalizedSchema.tables.length} tables found.`
+        isMongoDB
+          ? `Metadata loaded successfully: ${normalizedSchema.tables.length} collections found.`
+          : `Schema loaded successfully: ${normalizedSchema.tables.length} tables found.`
       );
     } catch (error) {
       console.error(
@@ -673,7 +658,7 @@ function App() {
   }
 
   // =========================================================
-  // SELECT TABLE
+  // SELECT TABLE / COLLECTION
   // =========================================================
 
   async function handleSelectTable(
@@ -691,7 +676,9 @@ function App() {
       setStatus("error");
 
       setMessage(
-        "Invalid table metadata."
+        isMongoDB
+          ? "Invalid collection metadata."
+          : "Invalid table metadata."
       );
 
       return;
@@ -709,15 +696,18 @@ function App() {
         )
           ? table.columns
           : [],
+
+      indexes:
+        Array.isArray(
+          table.indexes
+        )
+          ? table.indexes
+          : [],
     };
 
     setSelectedTable(
       normalizedTable
     );
-
-    // =======================================================
-    // CREATE DEFAULT COLUMN BUSINESS MAPPINGS
-    // =======================================================
 
     const defaultColumnMappings =
       normalizedTable.columns.map(
@@ -742,12 +732,10 @@ function App() {
     setStatus("idle");
 
     setMessage(
-      `Selected table: ${tableName}`
+      isMongoDB
+        ? `Selected collection: ${tableName}`
+        : `Selected table: ${tableName}`
     );
-
-    // =======================================================
-    // TRY LOADING SAVED MAPPING
-    // =======================================================
 
     try {
       const result =
@@ -817,9 +805,6 @@ function App() {
         ) &&
         savedColumns.length > 0
       ) {
-        // Preserve all real DB columns even if
-        // older saved mapping is incomplete.
-
         const mergedColumns =
           defaultColumnMappings.map(
             (defaultColumn) => {
@@ -847,12 +832,11 @@ function App() {
       setStatus("success");
 
       setMessage(
-        `Existing mapping loaded for "${tableName}".`
+        isMongoDB
+          ? `Existing mapping loaded for collection "${tableName}".`
+          : `Existing mapping loaded for "${tableName}".`
       );
     } catch (error) {
-      // A missing mapping is normal for a new table.
-      // Keep the empty mapping form.
-
       console.log(
         `No existing mapping found for ${tableName}.`,
         error
@@ -879,7 +863,7 @@ function App() {
   }
 
   // =========================================================
-  // COLUMN MAPPING CHANGE
+  // COLUMN / FIELD MAPPING CHANGE
   // =========================================================
 
   function handleColumnMappingChange(
@@ -908,103 +892,106 @@ function App() {
   // =========================================================
 
   async function handleSaveMapping() {
-  console.log("SAVE BUTTON CLICKED");
+    if (!selectedTable) {
+      setStatus("error");
 
-  if (!selectedTable) {
-    console.error("No table selected");
+      setMessage(
+        isMongoDB
+          ? "Please select a collection first."
+          : "Please select a table first."
+      );
 
-    setStatus("error");
-    setMessage("Please select a table first.");
-    return;
-  }
+      return;
+    }
 
-  if (!mapping.business_entity.trim()) {
-    console.error("Business entity missing");
+    if (!mapping.business_entity.trim()) {
+      setStatus("error");
 
-    setStatus("error");
-    setMessage("Business Entity is required.");
-    return;
-  }
+      setMessage(
+        "Business Entity is required."
+      );
 
-  const databaseName =
-    schema?.database_name ||
-    form.database_name ||
-    "default";
+      return;
+    }
 
-  const payload = {
-    table_name: selectedTable.table_name,
+    const databaseName =
+      schema?.database_name ||
+      form.database_name ||
+      "default";
 
-    business_entity:
-      mapping.business_entity.trim(),
+    const payload = {
+      table_name:
+        selectedTable.table_name,
 
-    business_description:
-      mapping.business_description.trim(),
+      business_entity:
+        mapping.business_entity.trim(),
 
-    primary_identifier:
-      mapping.primary_identifier || null,
+      business_description:
+        mapping.business_description.trim(),
 
-    date_field:
-      mapping.date_field || null,
+      primary_identifier:
+        mapping.primary_identifier || null,
 
-    amount_field:
-      mapping.amount_field || null,
+      date_field:
+        mapping.date_field || null,
 
-    status_field:
-      mapping.status_field || null,
+      amount_field:
+        mapping.amount_field || null,
 
-    column_mappings:
-      columnMappings.map((column) => ({
-        column_name: column.column_name,
-        business_name:
-          column.business_name?.trim() || "",
-        description:
-          column.description?.trim() || "",
-      })),
+      status_field:
+        mapping.status_field || null,
 
-    custom_mappings: [],
+      column_mappings:
+        columnMappings.map((column) => ({
+          column_name:
+            column.column_name,
 
-    custom_prompt:
-      mapping.custom_prompt.trim(),
-  };
+          business_name:
+            column.business_name?.trim() || "",
 
-  console.log("DATABASE:", databaseName);
-  console.log("SAVE PAYLOAD:", payload);
+          description:
+            column.description?.trim() || "",
+        })),
 
-  try {
-    setStatus("loading");
-    setMessage("Saving mapping and prompt...");
+      custom_mappings: [],
 
-    const result =
+      custom_prompt:
+        mapping.custom_prompt.trim(),
+    };
+
+    try {
+      setStatus("loading");
+
+      setMessage(
+        "Saving mapping and prompt..."
+      );
+
       await saveTableMapping(
         payload,
         databaseName
       );
 
-    console.log(
-      "SAVE API RESPONSE:",
-      result
-    );
+      setStatus("success");
 
-    setStatus("success");
+      setMessage(
+        isMongoDB
+          ? `Mapping for collection "${selectedTable.table_name}" saved successfully.`
+          : `Mapping for "${selectedTable.table_name}" saved successfully.`
+      );
+    } catch (error) {
+      console.error(
+        "Save mapping error:",
+        error
+      );
 
-    setMessage(
-      `Mapping for "${selectedTable.table_name}" saved successfully.`
-    );
-  } catch (error) {
-    console.error(
-      "SAVE MAPPING ERROR:",
-      error
-    );
+      setStatus("error");
 
-    setStatus("error");
-
-    setMessage(
-      error?.message ||
-        "Unable to save mapping."
-    );
+      setMessage(
+        error?.message ||
+          "Unable to save mapping."
+      );
+    }
   }
-}
-
 
   // =========================================================
   // JSX
@@ -1012,10 +999,6 @@ function App() {
 
   return (
     <div className="app-shell">
-
-      {/* =====================================================
-          HEADER
-      ====================================================== */}
 
       <header className="topbar">
 
@@ -1058,21 +1041,9 @@ function App() {
 
       </header>
 
-      {/* =====================================================
-          DASHBOARD
-      ====================================================== */}
-
       <div className="dashboard">
 
-        {/* ===================================================
-            SIDEBAR
-        ==================================================== */}
-
         <aside className="sidebar">
-
-          {/* =================================================
-              DATABASE CONNECTION PANEL
-          ================================================== */}
 
           <section className="panel">
 
@@ -1093,6 +1064,61 @@ function App() {
             </div>
 
             <label>
+              Database Type
+            </label>
+
+            <select
+              name="database_family"
+              value={form.database_family}
+              onChange={(event) => {
+                const family =
+                  event.target.value;
+
+                setForm((current) => ({
+                  ...current,
+
+                  database_family:
+                    family,
+
+                  db_type:
+                    family === "sql"
+                      ? "mysql"
+                      : "mongodb",
+
+                  port:
+                    family === "sql"
+                      ? 3306
+                      : 27017,
+
+                  username:
+                    family === "sql"
+                      ? "root"
+                      : "",
+
+                  password: "",
+                }));
+
+                setConnectionSuccessful(false);
+                setConsentGranted(false);
+                setShowConsent(false);
+                setSchema(null);
+                setSelectedTable(null);
+                setColumnMappings([]);
+                setMapping(getEmptyMapping());
+                setStatus("idle");
+                setMessage("");
+              }}
+            >
+              <option value="sql">
+                SQL
+              </option>
+
+              <option value="nosql">
+                NoSQL
+              </option>
+            </select>
+
+            <label>
               Database Engine
             </label>
 
@@ -1101,11 +1127,21 @@ function App() {
               value={form.db_type}
               onChange={handleChange}
             >
+              {form.database_family === "sql" ? (
+                <>
+                  <option value="mysql">
+                    MySQL / MariaDB
+                  </option>
 
-              <option value="mysql">
-                MySQL / MariaDB
-              </option>
-
+                  <option value="postgresql">
+                    PostgreSQL
+                  </option>
+                </>
+              ) : (
+                <option value="mongodb">
+                  MongoDB
+                </option>
+              )}
             </select>
 
             <div className="host-port-row">
@@ -1154,7 +1190,11 @@ function App() {
               name="database_name"
               value={form.database_name}
               onChange={handleChange}
-              placeholder="metadata_test"
+              placeholder={
+                isMongoDB
+                  ? "metadata_mongo_test"
+                  : "metadata_test"
+              }
             />
 
             <label>
@@ -1166,7 +1206,11 @@ function App() {
               name="username"
               value={form.username}
               onChange={handleChange}
-              placeholder="root"
+              placeholder={
+                isMongoDB
+                  ? "MongoDB username"
+                  : "root"
+              }
             />
 
             <label>
@@ -1209,7 +1253,9 @@ function App() {
                   !consentGranted
                 }
               >
-                Fetch Schema
+                {isMongoDB
+                  ? "Fetch Metadata"
+                  : "Fetch Schema"}
               </button>
 
             </div>
@@ -1224,10 +1270,6 @@ function App() {
 
           </section>
 
-          {/* =================================================
-              SCHEMA EXPLORER
-          ================================================== */}
-
           <section className="panel schema-tree-panel">
 
             <div className="panel-title-row">
@@ -1239,7 +1281,9 @@ function App() {
                 </span>
 
                 <h2>
-                  Schema Explorer
+                  {isMongoDB
+                    ? "Collection Explorer"
+                    : "Schema Explorer"}
                 </h2>
 
               </div>
@@ -1248,7 +1292,9 @@ function App() {
 
             {!schema && (
               <div className="empty-sidebar">
-                Connect and fetch schema to explore tables.
+                {isMongoDB
+                  ? "Connect and fetch metadata to explore collections."
+                  : "Connect and fetch schema to explore tables."}
               </div>
             )}
 
@@ -1294,7 +1340,7 @@ function App() {
                           <span className="table-name">
 
                             <span className="table-icon">
-                              T
+                              {isMongoDB ? "C" : "T"}
                             </span>
 
                             {tableName}
@@ -1302,10 +1348,9 @@ function App() {
                           </span>
 
                           <span className="column-count">
-                            {
-                              table.columns
-                                ?.length ?? 0
-                            }
+                            {isMongoDB
+                              ? table.indexes?.length ?? 0
+                              : table.columns?.length ?? 0}
                           </span>
 
                         </button>
@@ -1322,22 +1367,14 @@ function App() {
 
         </aside>
 
-        {/* ===================================================
-            MAIN CONTENT
-        ==================================================== */}
-
         <main className="main-content">
-
-          {/* =================================================
-              STATISTICS
-          ================================================== */}
 
           <section className="stats-grid">
 
             <div className="stat-card">
 
               <span className="stat-icon">
-                T
+                {isMongoDB ? "C" : "T"}
               </span>
 
               <div>
@@ -1347,7 +1384,9 @@ function App() {
                 </span>
 
                 <span className="stat-label">
-                  Discovered Tables
+                  {isMongoDB
+                    ? "Discovered Collections"
+                    : "Discovered Tables"}
                 </span>
 
               </div>
@@ -1357,7 +1396,7 @@ function App() {
             <div className="stat-card">
 
               <span className="stat-icon">
-                C
+                F
               </span>
 
               <div>
@@ -1367,7 +1406,9 @@ function App() {
                 </span>
 
                 <span className="stat-label">
-                  Catalog Columns
+                  {isMongoDB
+                    ? "Schema Fields"
+                    : "Catalog Columns"}
                 </span>
 
               </div>
@@ -1377,17 +1418,21 @@ function App() {
             <div className="stat-card">
 
               <span className="stat-icon">
-                R
+                {isMongoDB ? "I" : "R"}
               </span>
 
               <div>
 
                 <span className="stat-number">
-                  {relationshipCount}
+                  {isMongoDB
+                    ? indexCount
+                    : relationshipCount}
                 </span>
 
                 <span className="stat-label">
-                  Relationships
+                  {isMongoDB
+                    ? "Indexes"
+                    : "Relationships"}
                 </span>
 
               </div>
@@ -1395,10 +1440,6 @@ function App() {
             </div>
 
           </section>
-
-          {/* =================================================
-              MAIN CONTENT PANEL
-          ================================================== */}
 
           <section className="content-panel">
 
@@ -1415,8 +1456,8 @@ function App() {
 
                 <p>
                   Connect a database and inspect
-                  schema metadata without reading
-                  actual business records.
+                  metadata without reading actual
+                  business records.
                 </p>
 
                 <p className="security-note">
@@ -1435,26 +1476,39 @@ function App() {
                   </div>
 
                   <h2>
-                    Schema Loaded
+                    {isMongoDB
+                      ? "MongoDB Metadata Loaded"
+                      : "Schema Loaded"}
                   </h2>
 
                   <p>
-                    {tableCount} tables and{" "}
-                    {columnCount} columns were
-                    discovered.
+                    {tableCount}{" "}
+                    {isMongoDB
+                      ? "collections"
+                      : "tables"}{" "}
+                    and {columnCount}{" "}
+                    {isMongoDB
+                      ? "schema fields"
+                      : "columns"}{" "}
+                    were discovered.
                   </p>
 
+                  {isMongoDB && (
+                    <p>
+                      {indexCount} indexes were discovered.
+                    </p>
+                  )}
+
                   <p>
-                    Select a table from the Schema
-                    Explorer to inspect and map it.
+                    Select a{" "}
+                    {isMongoDB
+                      ? "collection"
+                      : "table"}{" "}
+                    from the explorer to inspect and map it.
                   </p>
 
                 </div>
               )}
-
-            {/* =================================================
-                SELECTED TABLE
-            ================================================== */}
 
             {selectedTable && (
               <div className="table-details">
@@ -1464,28 +1518,27 @@ function App() {
                   <div>
 
                     <span className="eyebrow">
-                      SELECTED TABLE
+                      {isMongoDB
+                        ? "SELECTED COLLECTION"
+                        : "SELECTED TABLE"}
                     </span>
 
                     <h2>
-                      {
-                        selectedTable.table_name
-                      }
+                      {selectedTable.table_name}
                     </h2>
 
                     <p className="table-subtitle">
-                      Technical schema metadata and
-                      business interpretation
+                      {isMongoDB
+                        ? "MongoDB collection metadata and business interpretation"
+                        : "Technical schema metadata and business interpretation"}
                     </p>
 
                   </div>
 
                   <span className="table-count-badge">
-                    {
-                      selectedTable
-                        .columns.length
-                    }{" "}
-                    columns
+                    {isMongoDB
+                      ? `${selectedTable.indexes?.length ?? 0} indexes`
+                      : `${selectedTable.columns.length} columns`}
                   </span>
 
                 </div>
@@ -1499,99 +1552,227 @@ function App() {
                   <div className="section-heading">
 
                     <h3>
-                      Technical Metadata
+                      {isMongoDB
+                        ? "Schema Field Metadata"
+                        : "Technical Metadata"}
                     </h3>
 
                     <p>
-                      Metadata only — no table rows are queried.
+                      Metadata only — no business records are queried.
                     </p>
 
                   </div>
 
-                  <div className="column-table">
+                  {selectedTable.columns.length > 0 ? (
+                    <div className="column-table">
 
-                    <div className="column-table-header">
+                      <div className="column-table-header">
 
-                      <span>
-                        Column
-                      </span>
+                        <span>
+                          {isMongoDB
+                            ? "Field"
+                            : "Column"}
+                        </span>
 
-                      <span>
-                        Type
-                      </span>
+                        <span>
+                          Type
+                        </span>
 
-                      <span>
-                        Nullable
-                      </span>
+                        <span>
+                          {isMongoDB
+                            ? "Optional"
+                            : "Nullable"}
+                        </span>
 
-                      <span>
-                        Key / Reference
-                      </span>
+                        <span>
+                          {isMongoDB
+                            ? "Metadata"
+                            : "Key / Reference"}
+                        </span>
 
-                    </div>
+                      </div>
 
-                    {selectedTable.columns.map(
-                      (column, index) => (
-                        <div
-                          key={`${selectedTable.table_name}-${column.name}-${index}`}
-                          className="column-row"
-                        >
+                      {selectedTable.columns.map(
+                        (column, index) => (
+                          <div
+                            key={`${selectedTable.table_name}-${column.name}-${index}`}
+                            className="column-row"
+                          >
 
-                          <span className="column-name">
-                            {column.name}
-                          </span>
+                            <span className="column-name">
+                              {column.name}
+                            </span>
 
-                          <span className="type-badge">
-                            {
-                              column.data_type
-                            }
-                          </span>
+                            <span className="type-badge">
+                              {column.data_type}
+                            </span>
 
-                          <span>
-                            {column.nullable
-                              ? "Yes"
-                              : "No"}
-                          </span>
+                            <span>
+                              {column.nullable
+                                ? "Yes"
+                                : "No"}
+                            </span>
 
-                          <span>
+                            <span>
 
-                            {column.is_primary_key && (
-                              <span className="key-badge primary">
-                                PK
-                              </span>
-                            )}
-
-                            {column.is_foreign_key && (
-                              <span className="reference-text">
-
-                                <span className="key-badge foreign">
-                                  FK
-                                </span>
-
-                                {column.referenced_table &&
-                                  column.referenced_column && (
-                                    <>
-                                      {" "}
-                                      {
-                                        column.referenced_table
-                                      }
-                                      .
-                                      {
-                                        column.referenced_column
-                                      }
-                                    </>
-                                  )}
-
-                              </span>
-                            )}
-
-                            {!column.is_primary_key &&
-                              !column.is_foreign_key && (
-                                <span className="muted">
-                                  —
+                              {column.is_primary_key && (
+                                <span className="key-badge primary">
+                                  PK
                                 </span>
                               )}
 
+                              {column.is_foreign_key && (
+                                <span className="reference-text">
+
+                                  <span className="key-badge foreign">
+                                    FK
+                                  </span>
+
+                                  {column.referenced_table &&
+                                    column.referenced_column && (
+                                      <>
+                                        {" "}
+                                        {column.referenced_table}.
+                                        {column.referenced_column}
+                                      </>
+                                    )}
+
+                                </span>
+                              )}
+
+                              {!column.is_primary_key &&
+                                !column.is_foreign_key && (
+                                  <span className="muted">
+                                    —
+                                  </span>
+                                )}
+
+                            </span>
+
+                          </div>
+                        )
+                      )}
+
+                    </div>
+                  ) : (
+                    <div className="empty-relationship">
+                      {isMongoDB
+                        ? "No explicit field schema was returned. MongoDB collections may be schemaless."
+                        : "No column metadata was returned."}
+                    </div>
+                  )}
+
+                </div>
+
+                {/* =============================================
+                    MONGODB INDEXES
+                ============================================== */}
+
+                {isMongoDB && (
+                  <div className="section-block">
+
+                    <div className="section-heading">
+
+                      <h3>
+                        Indexes
+                      </h3>
+
+                      <p>
+                        Index metadata discovered from MongoDB.
+                      </p>
+
+                    </div>
+
+                    {selectedTable.indexes?.length > 0 ? (
+                      selectedTable.indexes.map(
+                        (index, indexPosition) => (
+                          <div
+                            className="relationship-card"
+                            key={`${index.name}-${indexPosition}`}
+                          >
+
+                            <strong>
+                              {index.name}
+                            </strong>
+
+                            <span>
+                              {index.keys
+                                ?.map(
+                                  ([field, direction]) =>
+                                    `${field} (${direction})`
+                                )
+                                .join(", ")}
+                            </span>
+
+                            <span className="constraint-name">
+                              {index.unique
+                                ? "Unique"
+                                : "Non-unique"}
+                            </span>
+
+                          </div>
+                        )
+                      )
+                    ) : (
+                      <div className="empty-relationship">
+                        No indexes were returned for this collection.
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
+                {/* =============================================
+                    SQL RELATIONSHIPS
+                ============================================== */}
+
+                {!isMongoDB && (
+                  <div className="section-block">
+
+                    <div className="section-heading">
+
+                      <h3>
+                        Relationships
+                      </h3>
+
+                      <p>
+                        Foreign-key relationships discovered
+                        from database metadata.
+                      </p>
+
+                    </div>
+
+                    {selectedRelationships.length ===
+                      0 && (
+                      <div className="empty-relationship">
+                        No relationship metadata was returned
+                        for this table.
+                      </div>
+                    )}
+
+                    {selectedRelationships.map(
+                      (relationship, index) => (
+                        <div
+                          key={`${relationship.constraint_name}-${relationship.source_table}-${relationship.source_column}-${index}`}
+                          className="relationship-card"
+                        >
+
+                          <strong>
+                            {relationship.source_table}.
+                            {relationship.source_column}
+                          </strong>
+
+                          <span className="relationship-arrow">
+                            →
+                          </span>
+
+                          <strong>
+                            {relationship.target_table}.
+                            {relationship.target_column}
+                          </strong>
+
+                          <span className="constraint-name">
+                            {relationship.constraint_name}
                           </span>
 
                         </div>
@@ -1599,78 +1780,7 @@ function App() {
                     )}
 
                   </div>
-
-                </div>
-
-                {/* =============================================
-                    RELATIONSHIPS
-                ============================================== */}
-
-                <div className="section-block">
-
-                  <div className="section-heading">
-
-                    <h3>
-                      Relationships
-                    </h3>
-
-                    <p>
-                      Foreign-key relationships discovered
-                      from database metadata.
-                    </p>
-
-                  </div>
-
-                  {selectedRelationships.length ===
-                    0 && (
-                    <div className="empty-relationship">
-                      No relationship metadata was returned
-                      for this table.
-                    </div>
-                  )}
-
-                  {selectedRelationships.map(
-                    (relationship, index) => (
-                      <div
-                        key={`${relationship.constraint_name}-${relationship.source_table}-${relationship.source_column}-${index}`}
-                        className="relationship-card"
-                      >
-
-                        <strong>
-                          {
-                            relationship.source_table
-                          }
-                          .
-                          {
-                            relationship.source_column
-                          }
-                        </strong>
-
-                        <span className="relationship-arrow">
-                          →
-                        </span>
-
-                        <strong>
-                          {
-                            relationship.target_table
-                          }
-                          .
-                          {
-                            relationship.target_column
-                          }
-                        </strong>
-
-                        <span className="constraint-name">
-                          {
-                            relationship.constraint_name
-                          }
-                        </span>
-
-                      </div>
-                    )
-                  )}
-
-                </div>
+                )}
 
                 {/* =============================================
                     BUSINESS MAPPING
@@ -1685,7 +1795,7 @@ function App() {
                     </h3>
 
                     <p>
-                      Translate technical schema into
+                      Translate technical metadata into
                       business meaning for AI systems.
                     </p>
 
@@ -1708,7 +1818,11 @@ function App() {
                         onChange={
                           handleMappingChange
                         }
-                        placeholder="Example: Invoice"
+                        placeholder={
+                          isMongoDB
+                            ? "Example: Customer"
+                            : "Example: Invoice"
+                        }
                       />
 
                     </div>
@@ -1727,13 +1841,11 @@ function App() {
                         onChange={
                           handleMappingChange
                         }
-                        placeholder="Example: Stores customer invoice information."
+                        placeholder="Explain what this data entity represents."
                         rows="3"
                       />
 
                     </div>
-
-                    {/* PRIMARY IDENTIFIER */}
 
                     <div>
 
@@ -1752,7 +1864,9 @@ function App() {
                       >
 
                         <option value="">
-                          Select column
+                          {isMongoDB
+                            ? "Select field"
+                            : "Select column"}
                         </option>
 
                         {selectedTable.columns.map(
@@ -1763,9 +1877,7 @@ function App() {
                                 column.name
                               }
                             >
-                              {
-                                column.name
-                              }
+                              {column.name}
                             </option>
                           )
                         )}
@@ -1773,8 +1885,6 @@ function App() {
                       </select>
 
                     </div>
-
-                    {/* DATE FIELD */}
 
                     <div>
 
@@ -1800,13 +1910,9 @@ function App() {
                           (column) => (
                             <option
                               key={`date-${selectedTable.table_name}-${column.name}`}
-                              value={
-                                column.name
-                              }
+                              value={column.name}
                             >
-                              {
-                                column.name
-                              }
+                              {column.name}
                             </option>
                           )
                         )}
@@ -1814,8 +1920,6 @@ function App() {
                       </select>
 
                     </div>
-
-                    {/* AMOUNT FIELD */}
 
                     <div>
 
@@ -1841,13 +1945,9 @@ function App() {
                           (column) => (
                             <option
                               key={`amount-${selectedTable.table_name}-${column.name}`}
-                              value={
-                                column.name
-                              }
+                              value={column.name}
                             >
-                              {
-                                column.name
-                              }
+                              {column.name}
                             </option>
                           )
                         )}
@@ -1855,8 +1955,6 @@ function App() {
                       </select>
 
                     </div>
-
-                    {/* STATUS FIELD */}
 
                     <div>
 
@@ -1882,13 +1980,9 @@ function App() {
                           (column) => (
                             <option
                               key={`status-${selectedTable.table_name}-${column.name}`}
-                              value={
-                                column.name
-                              }
+                              value={column.name}
                             >
-                              {
-                                column.name
-                              }
+                              {column.name}
                             </option>
                           )
                         )}
@@ -1900,7 +1994,7 @@ function App() {
                   </div>
 
                   {/* ===========================================
-                      COLUMN BUSINESS MAPPING
+                      FIELD / COLUMN BUSINESS MAPPING
                   ============================================ */}
 
                   <div className="column-mapping-section">
@@ -1908,79 +2002,94 @@ function App() {
                     <div className="section-heading">
 
                       <h3>
-                        Column Business Mapping
+                        {isMongoDB
+                          ? "Field Business Mapping"
+                          : "Column Business Mapping"}
                       </h3>
 
                       <p>
-                        Add human-friendly names and
-                        descriptions for technical columns.
+                        Add human-friendly names and descriptions
+                        for technical{" "}
+                        {isMongoDB
+                          ? "fields."
+                          : "columns."}
                       </p>
 
                     </div>
 
-                    <div className="column-mapping-header">
+                    {columnMappings.length > 0 ? (
+                      <>
+                        <div className="column-mapping-header">
 
-                      <span>
-                        Technical Column
-                      </span>
+                          <span>
+                            {isMongoDB
+                              ? "Technical Field"
+                              : "Technical Column"}
+                          </span>
 
-                      <span>
-                        Business Name
-                      </span>
+                          <span>
+                            Business Name
+                          </span>
 
-                      <span>
-                        Description
-                      </span>
-
-                    </div>
-
-                    {columnMappings.map(
-                      (item, index) => (
-                        <div
-                          key={`${selectedTable.table_name}-mapping-${item.column_name}-${index}`}
-                          className="column-mapping-row"
-                        >
-
-                          <div className="technical-column-name">
-                            {
-                              item.column_name
-                            }
-                          </div>
-
-                          <input
-                            type="text"
-                            value={
-                              item.business_name ||
-                              ""
-                            }
-                            placeholder="Business name"
-                            onChange={(event) =>
-                              handleColumnMappingChange(
-                                index,
-                                "business_name",
-                                event.target.value
-                              )
-                            }
-                          />
-
-                          <input
-                            type="text"
-                            value={
-                              item.description ||
-                              ""
-                            }
-                            placeholder="Description"
-                            onChange={(event) =>
-                              handleColumnMappingChange(
-                                index,
-                                "description",
-                                event.target.value
-                              )
-                            }
-                          />
+                          <span>
+                            Description
+                          </span>
 
                         </div>
-                      )
+
+                        {columnMappings.map(
+                          (item, index) => (
+                            <div
+                              key={`${selectedTable.table_name}-mapping-${item.column_name}-${index}`}
+                              className="column-mapping-row"
+                            >
+
+                              <div className="technical-column-name">
+                                {item.column_name}
+                              </div>
+
+                              <input
+                                type="text"
+                                value={
+                                  item.business_name ||
+                                  ""
+                                }
+                                placeholder="Business name"
+                                onChange={(event) =>
+                                  handleColumnMappingChange(
+                                    index,
+                                    "business_name",
+                                    event.target.value
+                                  )
+                                }
+                              />
+
+                              <input
+                                type="text"
+                                value={
+                                  item.description ||
+                                  ""
+                                }
+                                placeholder="Description"
+                                onChange={(event) =>
+                                  handleColumnMappingChange(
+                                    index,
+                                    "description",
+                                    event.target.value
+                                  )
+                                }
+                              />
+
+                            </div>
+                          )
+                        )}
+                      </>
+                    ) : (
+                      <div className="empty-relationship">
+                        {isMongoDB
+                          ? "No explicit MongoDB fields are available yet. Field mappings will become available when schema validator metadata is present."
+                          : "No columns are available for mapping."}
+                      </div>
                     )}
 
                   </div>
@@ -1992,7 +2101,9 @@ function App() {
                   <div className="prompt-block">
 
                     <label>
-                      Table-specific AI Instruction
+                      {isMongoDB
+                        ? "Collection-specific AI Instruction"
+                        : "Table-specific AI Instruction"}
                     </label>
 
                     <textarea
@@ -2004,12 +2115,16 @@ function App() {
                         handleMappingChange
                       }
                       rows="5"
-                      placeholder="Example: Use this table when the user asks about invoices, bills, payments, or invoice totals."
+                      placeholder={
+                        isMongoDB
+                          ? "Example: Use this collection when the user asks about customers."
+                          : "Example: Use this table when the user asks about invoices, bills, payments, or invoice totals."
+                      }
                     />
 
                     <p className="field-help">
                       This instruction is stored as metadata
-                      for future AI integration. No table
+                      for future AI integration. No business
                       records are read.
                     </p>
 
@@ -2081,7 +2196,7 @@ function App() {
 
             <p>
               The application requires permission
-              to inspect the schema structure of{" "}
+              to inspect metadata for{" "}
               <strong>
                 {form.database_name}
               </strong>
@@ -2097,33 +2212,45 @@ function App() {
                 </h3>
 
                 <ul>
+
                   <li>
                     Database name
                   </li>
 
                   <li>
-                    Table names
+                    {isMongoDB
+                      ? "Collection names"
+                      : "Table names"}
                   </li>
 
                   <li>
-                    Column names
+                    {isMongoDB
+                      ? "Schema validator fields (when defined)"
+                      : "Column names"}
                   </li>
 
                   <li>
-                    Data types
+                    {isMongoDB
+                      ? "Index metadata"
+                      : "Data types"}
                   </li>
 
-                  <li>
-                    Primary keys
-                  </li>
+                  {!isMongoDB && (
+                    <>
+                      <li>
+                        Primary keys
+                      </li>
 
-                  <li>
-                    Foreign keys
-                  </li>
+                      <li>
+                        Foreign keys
+                      </li>
 
-                  <li>
-                    Relationships
-                  </li>
+                      <li>
+                        Relationships
+                      </li>
+                    </>
+                  )}
+
                 </ul>
 
               </div>
@@ -2152,7 +2279,7 @@ function App() {
                   </li>
 
                   <li>
-                    Actual table rows
+                    Actual business data
                   </li>
                 </ul>
 

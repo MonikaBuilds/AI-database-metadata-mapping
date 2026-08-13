@@ -908,98 +908,103 @@ function App() {
   // =========================================================
 
   async function handleSaveMapping() {
-    if (!selectedTable) {
-      setStatus("error");
+  console.log("SAVE BUTTON CLICKED");
 
-      setMessage(
-        "Select a table first."
-      );
+  if (!selectedTable) {
+    console.error("No table selected");
 
-      return;
-    }
+    setStatus("error");
+    setMessage("Please select a table first.");
+    return;
+  }
 
-    if (
-      !mapping.business_entity.trim()
-    ) {
-      setStatus("error");
+  if (!mapping.business_entity.trim()) {
+    console.error("Business entity missing");
 
-      setMessage(
-        "Business Entity is required."
-      );
+    setStatus("error");
+    setMessage("Business Entity is required.");
+    return;
+  }
 
-      return;
-    }
+  const databaseName =
+    schema?.database_name ||
+    form.database_name ||
+    "default";
 
-    const payload = {
-      table_name:
-        selectedTable.table_name,
+  const payload = {
+    table_name: selectedTable.table_name,
 
-      business_entity:
-        mapping.business_entity.trim(),
+    business_entity:
+      mapping.business_entity.trim(),
 
-      business_description:
-        mapping.business_description.trim(),
+    business_description:
+      mapping.business_description.trim(),
 
-      primary_identifier:
-        mapping.primary_identifier ||
-        null,
+    primary_identifier:
+      mapping.primary_identifier || null,
 
-      date_field:
-        mapping.date_field ||
-        null,
+    date_field:
+      mapping.date_field || null,
 
-      amount_field:
-        mapping.amount_field ||
-        null,
+    amount_field:
+      mapping.amount_field || null,
 
-      status_field:
-        mapping.status_field ||
-        null,
+    status_field:
+      mapping.status_field || null,
 
-      column_mappings:
-        columnMappings,
+    column_mappings:
+      columnMappings.map((column) => ({
+        column_name: column.column_name,
+        business_name:
+          column.business_name?.trim() || "",
+        description:
+          column.description?.trim() || "",
+      })),
 
-      custom_mappings:
-        [],
+    custom_mappings: [],
 
-      custom_prompt:
-        mapping.custom_prompt.trim(),
-    };
+    custom_prompt:
+      mapping.custom_prompt.trim(),
+  };
 
-    try {
-      setStatus("loading");
+  console.log("DATABASE:", databaseName);
+  console.log("SAVE PAYLOAD:", payload);
 
-      setMessage(
-        "Saving business mapping..."
-      );
+  try {
+    setStatus("loading");
+    setMessage("Saving mapping and prompt...");
 
+    const result =
       await saveTableMapping(
         payload,
-
-        schema?.database_name ||
-          form.database_name ||
-          "default"
+        databaseName
       );
 
-      setStatus("success");
+    console.log(
+      "SAVE API RESPONSE:",
+      result
+    );
 
-      setMessage(
-        `Mapping for "${selectedTable.table_name}" saved successfully.`
-      );
-    } catch (error) {
-      console.error(
-        "Save mapping error:",
-        error
-      );
+    setStatus("success");
 
-      setStatus("error");
+    setMessage(
+      `Mapping for "${selectedTable.table_name}" saved successfully.`
+    );
+  } catch (error) {
+    console.error(
+      "SAVE MAPPING ERROR:",
+      error
+    );
 
-      setMessage(
-        error?.message ||
-          "Unable to save mapping."
-      );
-    }
+    setStatus("error");
+
+    setMessage(
+      error?.message ||
+        "Unable to save mapping."
+    );
   }
+}
+
 
   // =========================================================
   // JSX

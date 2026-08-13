@@ -4,13 +4,19 @@ from pydantic import BaseModel, Field
 
 
 class ColumnMapping(BaseModel):
-    column_name: str
-    business_name: str
+    column_name: str = Field(..., min_length=1)
+    business_name: str = ""
+    description: Optional[str] = None
+
+
+class CustomMapping(BaseModel):
+    business_name: str = Field(..., min_length=1)
+    column_name: str = Field(..., min_length=1)
     description: Optional[str] = None
 
 
 class SaveTableMappingRequest(BaseModel):
-    table_name: str
+    table_name: str = Field(..., min_length=1)
 
     business_entity: str = Field(
         ...,
@@ -18,16 +24,22 @@ class SaveTableMappingRequest(BaseModel):
         description="Business-friendly name for the table",
     )
 
-    table_description: Optional[str] = None
+    business_description: Optional[str] = None
 
     primary_identifier: Optional[str] = None
     date_field: Optional[str] = None
     amount_field: Optional[str] = None
     status_field: Optional[str] = None
 
-    custom_prompt: Optional[str] = None
+    column_mappings: List[ColumnMapping] = Field(
+        default_factory=list
+    )
 
-    columns: List[ColumnMapping] = []
+    custom_mappings: List[CustomMapping] = Field(
+        default_factory=list
+    )
+
+    custom_prompt: Optional[str] = None
 
 
 class SaveTableMappingResponse(BaseModel):
@@ -36,15 +48,23 @@ class SaveTableMappingResponse(BaseModel):
 
 
 class TableMappingResponse(BaseModel):
+    database_name: str
     table_name: str
+
     business_entity: str
-    table_description: Optional[str] = None
+    business_description: Optional[str] = None
 
     primary_identifier: Optional[str] = None
     date_field: Optional[str] = None
     amount_field: Optional[str] = None
     status_field: Optional[str] = None
 
-    custom_prompt: Optional[str] = None
+    column_mappings: List[ColumnMapping] = Field(
+        default_factory=list
+    )
 
-    columns: List[ColumnMapping]
+    custom_mappings: List[CustomMapping] = Field(
+        default_factory=list
+    )
+
+    custom_prompt: Optional[str] = None

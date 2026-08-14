@@ -5,7 +5,7 @@ from app.schemas.mapping import SaveTableMappingRequest
 
 
 class MappingService:
-    """Temporary in-memory storage for table mappings."""
+    """Handles temporary storage of table and collection mappings."""
 
     _mappings: Dict[str, dict] = {}
 
@@ -55,6 +55,13 @@ class MappingService:
         mapping["table_name"] = cls._normalize(
             request.table_name,
             "Table name",
+        )
+
+        # Keep list fields consistent even when they are empty
+        mapping["aliases"] = mapping.get("aliases") or []
+
+        mapping["relationships"] = (
+            mapping.get("relationships") or []
         )
 
         mapping["column_mappings"] = (

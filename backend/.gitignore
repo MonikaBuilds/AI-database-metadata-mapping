@@ -6,8 +6,16 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-.env
 .pytest_cache/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Never commit service account credentials
+*service-account*.json
+*serviceAccount*.json
 
 # React / Node
 node_modules/
@@ -18,6 +26,6 @@ dist/
 .vscode/
 .idea/
 
+# Project-specific
 backend/.venv/
 frontend/node_modules/
-

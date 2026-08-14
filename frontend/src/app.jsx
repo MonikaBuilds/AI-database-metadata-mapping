@@ -59,16 +59,26 @@ function App() {
   const [mapping, setMapping] = useState({
     business_entity: "",
     business_description: "",
+    aliases: [],
     primary_identifier: "",
     date_field: "",
     amount_field: "",
     status_field: "",
+    customer_reference: "",
     custom_prompt: "",
   });
+  const [aliasInput, setAliasInput] = useState("");
 
+  const [relationships, setRelationships] = useState([]);
+
+  const [relationshipForm, setRelationshipForm] = useState({
+    source_column: "",
+    target_table: "",
+    target_column: "",
+    description: "",
+  });
   const [columnMappings, setColumnMappings] =
     useState([]);
-
   // =========================================================
   // EMPTY MAPPING
   // =========================================================
@@ -77,10 +87,12 @@ function App() {
     return {
       business_entity: "",
       business_description: "",
+      aliases: [],
       primary_identifier: "",
       date_field: "",
       amount_field: "",
       status_field: "",
+      customer_reference: "",
       custom_prompt: "",
     };
   }
@@ -126,8 +138,8 @@ function App() {
             const isPrimaryKey =
               Boolean(
                 column?.is_primary_key ||
-                  column?.primary_key ||
-                  column?.COLUMN_KEY === "PRI"
+                column?.primary_key ||
+                column?.COLUMN_KEY === "PRI"
               );
 
             const referencedTable =
@@ -145,8 +157,8 @@ function App() {
             const isForeignKey =
               Boolean(
                 column?.is_foreign_key ||
-                  column?.foreign_key ||
-                  referencedTable
+                column?.foreign_key ||
+                referencedTable
               );
 
             return {
@@ -334,6 +346,21 @@ function App() {
       );
     }, [schema]);
 
+  const targetTableColumns = useMemo(() => {
+    if (
+      !relationshipForm.target_table ||
+      !schema?.tables
+    ) {
+      return [];
+    }
+
+    const targetTable = schema.tables.find(
+      (table) =>
+        table.table_name === relationshipForm.target_table
+    );
+
+    return targetTable?.columns || [];
+  }, [schema, relationshipForm.target_table]);
   // =========================================================
   // SELECTED TABLE RELATIONSHIPS
   // =========================================================
@@ -349,9 +376,9 @@ function App() {
       ).filter(
         (relationship) =>
           relationship.source_table ===
-            selectedTable.table_name ||
+          selectedTable.table_name ||
           relationship.target_table ===
-            selectedTable.table_name
+          selectedTable.table_name
       );
     }, [schema, selectedTable]);
 
@@ -462,8 +489,8 @@ function App() {
       ) {
         throw new Error(
           result?.message ||
-            result?.detail ||
-            "Unable to connect to database."
+          result?.detail ||
+          "Unable to connect to database."
         );
       }
 
@@ -498,7 +525,7 @@ function App() {
 
       setMessage(
         error?.message ||
-          "Database connection failed."
+        "Database connection failed."
       );
     }
   }
@@ -540,7 +567,7 @@ function App() {
 
       setMessage(
         error?.message ||
-          "Unable to save metadata permission."
+        "Unable to save metadata permission."
       );
     }
   }
@@ -628,7 +655,7 @@ function App() {
       setMapping(
         getEmptyMapping()
       );
-
+      setAliasInput("");
       setStatus("success");
 
       setMessage(
@@ -652,7 +679,7 @@ function App() {
 
       setMessage(
         error?.message ||
-          "Unable to fetch database schema."
+        "Unable to fetch database schema."
       );
     }
   }
@@ -729,6 +756,16 @@ function App() {
       getEmptyMapping()
     );
 
+    setAliasInput("");
+    setRelationships([]);
+
+    setRelationshipForm({
+      source_column: "",
+      target_table: "",
+      target_column: "",
+      description: "",
+    });
+
     setStatus("idle");
 
     setMessage(
@@ -743,8 +780,8 @@ function App() {
           tableName,
 
           schema?.database_name ||
-            form.database_name ||
-            "default"
+          form.database_name ||
+          "default"
         );
 
       if (!result) {
@@ -765,34 +802,42 @@ function App() {
 
       setMapping({
         business_entity:
-          saved?.business_entity ||
-          "",
+          saved?.business_entity || "",
 
         business_description:
           saved?.business_description ||
           saved?.table_description ||
           "",
 
+        aliases:
+          Array.isArray(saved?.aliases)
+            ? saved.aliases
+            : [],
+
         primary_identifier:
-          saved?.primary_identifier ||
-          "",
+          saved?.primary_identifier || "",
 
         date_field:
-          saved?.date_field ||
-          "",
+          saved?.date_field || "",
 
         amount_field:
-          saved?.amount_field ||
-          "",
+          saved?.amount_field || "",
 
         status_field:
-          saved?.status_field ||
-          "",
+          saved?.status_field || "",
+
+        customer_reference:
+          saved?.customer_reference || "",
 
         custom_prompt:
-          saved?.custom_prompt ||
-          "",
+          saved?.custom_prompt || "",
       });
+
+      setRelationships(
+        Array.isArray(saved?.relationships)
+          ? saved.relationships
+          : []
+      );
 
       const savedColumns =
         saved?.column_mappings ||
@@ -817,9 +862,9 @@ function App() {
 
               return savedColumn
                 ? {
-                    ...defaultColumn,
-                    ...savedColumn,
-                  }
+                  ...defaultColumn,
+                  ...savedColumn,
+                }
                 : defaultColumn;
             }
           );
@@ -862,6 +907,127 @@ function App() {
     }));
   }
 
+  function handleAddAlias() {
+    const alias = aliasInput.trim();
+
+    if (!alias) {
+      return;
+    }
+
+    const alreadyExists = mapping.aliases.some(
+      (item) =>
+        item.toLowerCase() === alias.toLowerCase()
+    );
+
+    if (alreadyExists) {
+      setAliasInput("");
+      return;
+    }
+
+    setMapping((current) => ({
+      ...current,
+      aliases: [...current.aliases, alias],
+    }));
+
+    setAliasInput("");
+  }
+
+  function handleRemoveAlias(aliasToRemove) {
+    setMapping((current) => ({
+      ...current,
+      aliases: current.aliases.filter(
+        (alias) => alias !== aliasToRemove
+      ),
+    }));
+  }
+
+  function handleRelationshipChange(event) {
+    const { name, value } = event.target;
+
+    setRelationshipForm((current) => ({
+      ...current,
+      [name]: value,
+
+      // Reset target column when target table changes
+      ...(name === "target_table"
+        ? { target_column: "" }
+        : {}),
+    }));
+  }
+
+
+  function handleAddRelationship() {
+    const {
+      source_column,
+      target_table,
+      target_column,
+      description,
+    } = relationshipForm;
+
+    if (
+      !source_column ||
+      !target_table ||
+      !target_column
+    ) {
+      setStatus("error");
+
+      setMessage(
+        "Source column, target table and target column are required."
+      );
+
+      return;
+    }
+
+    const alreadyExists = relationships.some(
+      (relationship) =>
+        relationship.source_column === source_column &&
+        relationship.target_table === target_table &&
+        relationship.target_column === target_column
+    );
+
+    if (alreadyExists) {
+      setStatus("error");
+
+      setMessage(
+        "This relationship already exists."
+      );
+
+      return;
+    }
+
+    setRelationships((current) => [
+      ...current,
+      {
+        source_column,
+        target_table,
+        target_column,
+        description:
+          description.trim() || null,
+      },
+    ]);
+
+    setRelationshipForm({
+      source_column: "",
+      target_table: "",
+      target_column: "",
+      description: "",
+    });
+
+    setStatus("success");
+
+    setMessage("Relationship added.");
+  }
+
+
+  function handleRemoveRelationship(indexToRemove) {
+    setRelationships((current) =>
+      current.filter(
+        (_, index) =>
+          index !== indexToRemove
+      )
+    );
+  }
+
   // =========================================================
   // COLUMN / FIELD MAPPING CHANGE
   // =========================================================
@@ -877,11 +1043,11 @@ function App() {
           (item, itemIndex) =>
             itemIndex === index
               ? {
-                  ...item,
+                ...item,
 
-                  [field]:
-                    value,
-                }
+                [field]:
+                  value,
+              }
               : item
         )
     );
@@ -929,6 +1095,9 @@ function App() {
       business_description:
         mapping.business_description.trim(),
 
+      aliases:
+        mapping.aliases,
+
       primary_identifier:
         mapping.primary_identifier || null,
 
@@ -940,6 +1109,11 @@ function App() {
 
       status_field:
         mapping.status_field || null,
+
+      customer_reference:
+        mapping.customer_reference || null,
+
+      relationships,
 
       column_mappings:
         columnMappings.map((column) => ({
@@ -988,10 +1162,117 @@ function App() {
 
       setMessage(
         error?.message ||
-          "Unable to save mapping."
+        "Unable to save mapping."
       );
     }
   }
+
+  // =========================================================
+  // AI PROMPT PREVIEW
+  // =========================================================
+
+  const promptPreview = useMemo(() => {
+    if (!selectedTable) {
+      return "";
+    }
+
+    const lines = [];
+
+    const entity =
+      mapping.business_entity.trim() ||
+      selectedTable.table_name;
+
+    lines.push(
+      `${entity} data can be found in ${isMongoDB ? "collection" : "table"
+      } "${selectedTable.table_name}".`
+    );
+
+    if (mapping.business_description.trim()) {
+      lines.push("");
+      lines.push(
+        `Description: ${mapping.business_description.trim()}`
+      );
+    }
+
+    if (mapping.aliases.length > 0) {
+      lines.push("");
+      lines.push(
+        `Aliases: ${mapping.aliases.join(", ")}`
+      );
+    }
+
+    if (mapping.primary_identifier) {
+      lines.push("");
+      lines.push(
+        `Primary identifier: ${mapping.primary_identifier}`
+      );
+    }
+
+    if (mapping.date_field) {
+      lines.push(
+        `Date field: ${mapping.date_field}`
+      );
+    }
+
+    if (mapping.amount_field) {
+      lines.push(
+        `Amount field: ${mapping.amount_field}`
+      );
+    }
+
+    if (mapping.status_field) {
+      lines.push(
+        `Status field: ${mapping.status_field}`
+      );
+    }
+
+    if (mapping.customer_reference) {
+      lines.push(
+        `Customer reference: ${mapping.customer_reference}`
+      );
+    }
+
+    const mappedColumns = columnMappings.filter(
+      (column) => column.business_name?.trim()
+    );
+
+    if (mappedColumns.length > 0) {
+      lines.push("");
+      lines.push("Important fields:");
+
+      mappedColumns.forEach((column) => {
+        lines.push(
+          `${column.column_name} -> ${column.business_name}`
+        );
+      });
+    }
+
+    if (relationships.length > 0) {
+      lines.push("");
+      lines.push("Relationships:");
+
+      relationships.forEach((relationship) => {
+        lines.push(
+          `${selectedTable.table_name}.${relationship.source_column} -> ${relationship.target_table}.${relationship.target_column}`
+        );
+      });
+    }
+
+    if (mapping.custom_prompt.trim()) {
+      lines.push("");
+      lines.push(
+        `Instruction: ${mapping.custom_prompt.trim()}`
+      );
+    }
+
+    return lines.join("\n");
+  }, [
+    selectedTable,
+    mapping,
+    columnMappings,
+    relationships,
+    isMongoDB,
+  ]);
 
   // =========================================================
   // JSX
@@ -1326,7 +1607,7 @@ function App() {
                           type="button"
                           className={
                             selectedTable?.table_name ===
-                            tableName
+                              tableName
                               ? "table-tree-item active"
                               : "table-tree-item"
                           }
@@ -1744,11 +2025,11 @@ function App() {
 
                     {selectedRelationships.length ===
                       0 && (
-                      <div className="empty-relationship">
-                        No relationship metadata was returned
-                        for this table.
-                      </div>
-                    )}
+                        <div className="empty-relationship">
+                          No relationship metadata was returned
+                          for this table.
+                        </div>
+                      )}
 
                     {selectedRelationships.map(
                       (relationship, index) => (
@@ -1846,7 +2127,67 @@ function App() {
                       />
 
                     </div>
+                    {/* AI ALIASES */}
+                    <div className="full-field">
+                      <label>
+                        AI Aliases
+                      </label>
 
+                      <div className="alias-input-row">
+                        <input
+                          type="text"
+                          value={aliasInput}
+                          onChange={(event) =>
+                            setAliasInput(event.target.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              handleAddAlias();
+                            }
+                          }}
+                          placeholder="Example: Bill, Sales Invoice, Customer Bill"
+                        />
+
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={handleAddAlias}
+                        >
+                          Add Alias
+                        </button>
+                      </div>
+
+                      {mapping.aliases.length > 0 && (
+                        <div className="alias-list">
+                          {mapping.aliases.map((alias) => (
+                            <span
+                              className="alias-chip"
+                              key={alias}
+                            >
+                              {alias}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRemoveAlias(alias)
+                                }
+                                aria-label={`Remove ${alias}`}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <p className="field-help">
+                        Add alternative business terms for this table.
+                      </p>
+                    </div>
+
+
+                    {/* KEEP YOUR EXISTING PRIMARY IDENTIFIER CODE */}
                     <div>
 
                       <label>
@@ -1992,7 +2333,260 @@ function App() {
                     </div>
 
                   </div>
+                  {/* CUSTOMER REFERENCE */}
 
+                  <div>
+                    <label>
+                      Customer Reference
+                    </label>
+
+                    <select
+                      name="customer_reference"
+                      value={mapping.customer_reference}
+                      onChange={handleMappingChange}
+                    >
+                      <option value="">
+                        {isMongoDB
+                          ? "None / Select field"
+                          : "None / Select column"}
+                      </option>
+
+                      {selectedTable.columns.map(
+                        (column) => (
+                          <option
+                            key={`customer-reference-${selectedTable.table_name}-${column.name}`}
+                            value={column.name}
+                          >
+                            {column.name}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </div>
+                  {/* ===========================================
+                      MANUAL RELATIONSHIP MAPPING
+                  ============================================ */}
+
+                  <div className="column-mapping-section">
+
+                    <div className="section-heading">
+
+                      <h3>
+                        Relationship Mapping
+                      </h3>
+
+                      <p>
+                        Define how this{" "}
+                        {isMongoDB ? "collection" : "table"}{" "}
+                        is connected to another{" "}
+                        {isMongoDB ? "collection." : "table."}
+                      </p>
+
+                    </div>
+
+
+                    <div className="mapping-grid">
+
+                      {/* Source Column */}
+                      <div>
+
+                        <label>
+                          {isMongoDB
+                            ? "Source Field"
+                            : "Source Column"}
+                        </label>
+
+                        <select
+                          name="source_column"
+                          value={relationshipForm.source_column}
+                          onChange={handleRelationshipChange}
+                        >
+
+                          <option value="">
+                            {isMongoDB
+                              ? "Select field"
+                              : "Select column"}
+                          </option>
+
+                          {selectedTable.columns.map(
+                            (column) => (
+                              <option
+                                key={`relationship-source-${column.name}`}
+                                value={column.name}
+                              >
+                                {column.name}
+                              </option>
+                            )
+                          )}
+
+                        </select>
+
+                      </div>
+
+
+                      {/* Target Table */}
+                      <div>
+
+                        <label>
+                          {isMongoDB
+                            ? "Target Collection"
+                            : "Target Table"}
+                        </label>
+
+                        <select
+                          name="target_table"
+                          value={relationshipForm.target_table}
+                          onChange={handleRelationshipChange}
+                        >
+
+                          <option value="">
+                            {isMongoDB
+                              ? "Select collection"
+                              : "Select table"}
+                          </option>
+
+                          {(schema?.tables || [])
+                            .filter(
+                              (table) =>
+                                table.table_name !==
+                                selectedTable.table_name
+                            )
+                            .map((table) => (
+                              <option
+                                key={`relationship-target-${table.table_name}`}
+                                value={table.table_name}
+                              >
+                                {table.table_name}
+                              </option>
+                            ))}
+
+                        </select>
+
+                      </div>
+
+
+                      {/* Target Column */}
+                      <div>
+
+                        <label>
+                          {isMongoDB
+                            ? "Target Field"
+                            : "Target Column"}
+                        </label>
+
+                        <select
+                          name="target_column"
+                          value={relationshipForm.target_column}
+                          onChange={handleRelationshipChange}
+                          disabled={!relationshipForm.target_table}
+                        >
+
+                          <option value="">
+                            {isMongoDB
+                              ? "Select field"
+                              : "Select column"}
+                          </option>
+
+                          {targetTableColumns.map(
+                            (column) => (
+                              <option
+                                key={`relationship-target-column-${column.name}`}
+                                value={column.name}
+                              >
+                                {column.name}
+                              </option>
+                            )
+                          )}
+
+                        </select>
+
+                      </div>
+
+
+                      {/* Description */}
+                      <div className="full-field">
+
+                        <label>
+                          Description
+                        </label>
+
+                        <input
+                          type="text"
+                          name="description"
+                          value={relationshipForm.description}
+                          onChange={handleRelationshipChange}
+                          placeholder="Example: Links invoice to customer"
+                        />
+
+                      </div>
+
+                    </div>
+
+
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={handleAddRelationship}
+                    >
+                      Add Relationship
+                    </button>
+
+
+                    {/* Added Relationships */}
+                    {relationships.length > 0 && (
+
+                      <div className="relationship-list">
+
+                        {relationships.map(
+                          (relationship, index) => (
+
+                            <div
+                              className="relationship-card"
+                              key={`${relationship.source_column}-${relationship.target_table}-${relationship.target_column}-${index}`}
+                            >
+
+                              <strong>
+                                {selectedTable.table_name}.
+                                {relationship.source_column}
+                              </strong>
+
+                              <span>
+                                →
+                              </span>
+
+                              <strong>
+                                {relationship.target_table}.
+                                {relationship.target_column}
+                              </strong>
+
+
+                              {relationship.description && (
+                                <span>
+                                  {relationship.description}
+                                </span>
+                              )}
+
+
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() =>
+                                  handleRemoveRelationship(index)
+                                }
+                              >
+                                Remove
+                              </button>
+
+                            </div>
+
+                          )
+                        )}
+
+                      </div>
+
+                    )}
+
+                  </div>
                   {/* ===========================================
                       FIELD / COLUMN BUSINESS MAPPING
                   ============================================ */}
@@ -2093,7 +2687,28 @@ function App() {
                     )}
 
                   </div>
+                  {/* ===========================================
+                      AI PROMPT PREVIEW
+                  ============================================ */}
 
+                  <div className="column-mapping-section">
+
+                    <div className="section-heading">
+                      <h3>AI Prompt Preview</h3>
+
+                      <p>
+                        Preview generated from the current metadata
+                        and business mapping.
+                      </p>
+                    </div>
+
+                    <textarea
+                      value={promptPreview}
+                      readOnly
+                      rows="14"
+                    />
+
+                  </div>
                   {/* ===========================================
                       CUSTOM AI PROMPT
                   ============================================ */}
